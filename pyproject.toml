@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aws-ssm-connect"
+dynamic = ["version"]
+requires-python = ">=3.8"
+dependencies = [
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+aws-ssm-connect = "aws_connect:cli"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0"]
+
+# Version is derived from the latest git tag (single source of truth) instead of
+# being hardcoded here. A clean checkout of tag vX.Y.Z reports X.Y.Z; commits
+# ahead of the tag report a dev version like X.Y.(Z+1).devN+g<sha>.
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["aws_connect.py", "environments.yaml.example"]
+sources = ["."]

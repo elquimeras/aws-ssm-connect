@@ -1,0 +1,39 @@
+# Environment configuration for AWS Connection Manager
+# Reference template. The working config lives in environments.yaml (tracked in
+# this private repo). It holds AWS profile names and infrastructure identifiers
+# (jump hosts, cluster/replication-group ids, domains) — not credentials.
+
+rds:
+  my-environment:
+    profile: my-aws-profile
+    jumphost: My Jump Host
+    cluster: my-cluster-name
+    port: '5432'
+    # profile_cluster: other-profile   # optional: different profile for the cluster
+
+redis:
+  my-environment:
+    profile: my-aws-profile
+    jumphost: My Jump Host
+    cluster: my-replication-group-id
+    # endpoint: my-endpoint.cache.amazonaws.com  # fallback: literal endpoint, no AWS lookup
+    port: '6379'
+    # warning: 'Warning message'       # optional
+
+eks:
+  my-environment:
+    profile: my-k8s-profile
+    jumphost: My Jump Host
+    cluster: my-eks-cluster
+    port: '8443'
+
+opensearch:
+  my-environment:
+    profile: my-aws-profile
+    jumphost: My Jump Host
+    domain: my-domain
+
+ec2:
+  my-environment:
+    profile: my-aws-profile
+    jumphost: My Jump Host
