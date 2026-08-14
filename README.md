@@ -258,4 +258,4 @@ Verify that:
 
 ## 📚 Additional documentation
 
-[AWS SSM Port Forwarding Setup Guide](https://pagerduty.atlassian.net/wiki/spaces/Catalytic/pages/4887183497/AWS+SSM+Port+Forwarding+Setup+Guide)
+[AWS SSM Port Forwarding Setup Guide](https://aws.amazon.com/es/blogs/aws/new-port-forwarding-using-aws-system-manager-sessions-manager/)
