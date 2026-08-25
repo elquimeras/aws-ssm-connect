@@ -323,6 +323,66 @@ def linkable_source(aws_connect, tmp_path):
 
 
 @pytest.fixture
+def cwd_with_region_config(aws_connect, monkeypatch, tmp_path):
+    """
+    Config with a redis env that sets an explicit `region: us-west-2`, used to
+    verify the region override is threaded into lookup + SSM commands.
+    """
+    config = textwrap.dedent("""\
+        redis:
+          region-env:
+            profile: my-profile
+            jumphost: my-jumphost
+            endpoint: my-endpoint.cache.amazonaws.com
+            port: '6379'
+            region: us-west-2
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    return config_file
+
+
+@pytest.fixture
+def cwd_with_docdb_config(aws_connect, monkeypatch, tmp_path):
+    """
+    Config with a docdb env: literal endpoint, region override, and warning.
+    """
+    config = textwrap.dedent("""\
+        docdb:
+          production:
+            profile: my-profile
+            jumphost: my-jumphost
+            endpoint: my-docdb-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com
+            port: '27017'
+            region: us-west-2
+            warning: 'Connecting to production DocumentDB'
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    return config_file
+
+
+@pytest.fixture
+def cwd_with_docdb_bare_config(aws_connect, monkeypatch, tmp_path):
+    """
+    Config with a docdb env that has no `endpoint` key — friendly error path.
+    """
+    config = textwrap.dedent("""\
+        docdb:
+          bare-env:
+            profile: my-profile
+            jumphost: my-jumphost
+            port: '27017'
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    return config_file
+
+
+@pytest.fixture
 def mock_subprocess_elasticache_null(aws_connect, monkeypatch):
     """
     Patch run_command with side_effect ordered as:
