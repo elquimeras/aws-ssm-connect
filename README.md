@@ -38,9 +38,17 @@ pip install -e ".[dev]"
 ### Checkout (no install)
 
 ```bash
-# Works directly from the repo root — no install needed
-./aws-ssm-connect --help
+# Install the dependencies (click, pyyaml) first
+uv sync
+# or: pip install click pyyaml
+
+# Then run directly from the repo root — no install needed
+uv run ./aws-ssm-connect --help
+# or, with an activated environment: ./aws-ssm-connect --help
 ```
+
+`aws-ssm-connect` is a thin wrapper that imports and runs the CLI defined in
+`aws_connect.py`; the dependencies above are still required for it to work.
 
 ## 🎯 Usage
 

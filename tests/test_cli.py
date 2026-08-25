@@ -14,11 +14,17 @@ Spec requirements covered:
 """
 
 import os
+import pathlib
+import subprocess
+import sys
 import textwrap
 from unittest.mock import MagicMock
 
 import pytest
 from click.testing import CliRunner
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------
@@ -907,3 +913,28 @@ def test_config_env_var_directory_skipped(runner, aws_connect, monkeypatch, tmp_
     assert "Traceback" not in output, f"Traceback leaked: {output!r}"
     assert "IsADirectoryError" not in output, f"IsADirectoryError leaked: {output!r}"
     assert "environments.yaml" in output, f"Expected friendly missing-config error: {output!r}"
+
+
+# ---------------------------------------------------------------------------
+# entrypoint-wrapper — subprocess smoke test for the checked-in `aws-ssm-connect`
+# file itself (not just the `aws_connect` module via CliRunner).
+# ---------------------------------------------------------------------------
+
+
+def test_wrapper_entrypoint_help_subprocess():
+    """`./aws-ssm-connect --help` runs as a real subprocess from the repo root,
+    exits 0, and prints Click usage text — regardless of whether the file is
+    still the duplicated CLI body or the thin wrapper."""
+    wrapper = REPO_ROOT / "aws-ssm-connect"
+    assert os.access(wrapper, os.X_OK), f"Expected {wrapper} to be executable"
+
+    result = subprocess.run(
+        [sys.executable, str(wrapper), "--help"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Usage:" in result.stdout
+    assert "Traceback" not in result.stderr
