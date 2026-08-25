@@ -14,6 +14,8 @@ Spec requirements covered:
 """
 
 import os
+import textwrap
+from unittest.mock import MagicMock
 
 import pytest
 from click.testing import CliRunner
@@ -57,7 +59,7 @@ def test_help_root_no_config(runner, aws_connect, cwd_no_config):
 
 @pytest.mark.parametrize(
     "subcommand",
-    ["list", "list-instances", "jumphost", "rds", "redis", "opensearch", "eks"],
+    ["list", "list-instances", "jumphost", "rds", "redis", "opensearch", "eks", "docdb"],
 )
 def test_help_subcommands_no_config(runner, aws_connect, cwd_no_config, subcommand):
     result = runner.invoke(aws_connect.cli, [subcommand, "--help"])
@@ -338,6 +340,191 @@ def test_redis_neither_cluster_nor_endpoint(
     assert "cluster" in output or "endpoint" in output, (
         f"Expected friendly error mentioning missing keys: {output!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Region configuration (docdb-port-forwarding change)
+# ---------------------------------------------------------------------------
+
+
+def _ssm_call_arg(mock_os_system):
+    return mock_os_system.call_args[0][0]
+
+
+@pytest.mark.parametrize("command,env", [("rds", "staging"), ("redis", "staging"),
+                                          ("opensearch", "staging")])
+def test_region_default_when_absent(runner, aws_connect, cwd_with_config, mock_subprocess, command, env):
+    """No 'region' key configured: existing commands keep using DEFAULT_REGION
+    (us-east-1) in the SSM command — behavior preservation for the refactor."""
+    result = runner.invoke(aws_connect.cli, [command, "--env", env])
+    assert result.exit_code == 0, result.output
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert "--region us-east-1" in call_arg, (
+        f"Expected default region in SSM command: {call_arg!r}"
+    )
+
+
+def test_region_override_redis(runner, aws_connect, cwd_with_region_config, mock_subprocess):
+    """redis env with 'region: us-west-2' propagates into the SSM command."""
+    result = runner.invoke(aws_connect.cli, ["redis", "--env", "region-env"])
+    assert result.exit_code == 0, result.output
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert "--region us-west-2" in call_arg, (
+        f"Expected overridden region in SSM command: {call_arg!r}"
+    )
+    assert "--region us-east-1" not in call_arg, (
+        f"Default region must not leak when override is set: {call_arg!r}"
+    )
+
+
+def test_region_override_reaches_instance_lookup(runner, aws_connect, cwd_with_region_config, monkeypatch):
+    """The instance-id lookup (run_command) must also receive the overridden region,
+    not just the final SSM command."""
+    mock_run = MagicMock(return_value=("fake-id", 0))
+    monkeypatch.setattr(aws_connect, "run_command", mock_run)
+    monkeypatch.setattr("os.system", MagicMock(return_value=0))
+    result = runner.invoke(aws_connect.cli, ["redis", "--env", "region-env"])
+    assert result.exit_code == 0, result.output
+    lookup_cmd = mock_run.call_args_list[0][0][0]
+    assert "--region us-west-2" in lookup_cmd, (
+        f"Expected instance lookup to use overridden region: {lookup_cmd!r}"
+    )
+
+
+def test_region_absent_never_produces_none_token(runner, aws_connect, cwd_with_config, mock_subprocess):
+    """Absent region must resolve to the default, never leak a literal 'None'."""
+    result = runner.invoke(aws_connect.cli, ["redis", "--env", "staging"])
+    assert result.exit_code == 0, result.output
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert "--region None" not in call_arg, f"Leaked '--region None': {call_arg!r}"
+
+
+def test_region_helper_resolves_from_config():
+    """Unit test for `_region(config)`: config value wins; absent/None/empty fall
+    back to DEFAULT_REGION."""
+    import aws_connect as ac
+    assert ac._region({"region": "eu-west-1"}) == "eu-west-1"
+    assert ac._region({}) == ac.DEFAULT_REGION
+    assert ac._region({"region": None}) == ac.DEFAULT_REGION
+    assert ac._region({"region": ""}) == ac.DEFAULT_REGION
+
+
+def test_region_eks_kubeconfig_arn_and_flag(runner, aws_connect, monkeypatch, tmp_path, mock_subprocess):
+    """EKS: region threaded into the kubeconfig cluster ARN and
+    `update-kubeconfig --region`."""
+    config = textwrap.dedent("""\
+        eks:
+          region-env:
+            profile: my-profile
+            jumphost: my-jumphost
+            cluster: my-eks-cluster
+            port: '8443'
+            region: eu-west-1
+            account_id: '123456789012'
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    aws_connect._ENVIRONMENTS_CACHE = None
+
+    calls = []
+    monkeypatch.setattr("os.system", lambda cmd: calls.append(cmd) or 0)
+
+    result = runner.invoke(
+        aws_connect.cli, ["eks", "--env", "region-env", "--configure-kubeconfig"]
+    )
+    assert result.exit_code == 0, result.output
+    joined = "\n".join(calls)
+    assert "arn:aws:eks:eu-west-1:123456789012:cluster/my-eks-cluster" in joined, (
+        f"Expected region-aware kubeconfig ARN: {joined!r}"
+    )
+    assert "update-kubeconfig" in joined and "--region eu-west-1" in joined, (
+        f"Expected update-kubeconfig --region eu-west-1: {joined!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# docdb command (docdb-port-forwarding change)
+# ---------------------------------------------------------------------------
+
+
+def test_docdb_valid_env_opens_tunnel(runner, aws_connect, cwd_with_docdb_config, mock_subprocess):
+    """Valid docdb env: resolves jumphost, starts SSM port-forwarding session to
+    the literal endpoint:port, prints warning, exit 0."""
+    result = runner.invoke(aws_connect.cli, ["docdb", "--env", "production"])
+    assert result.exit_code == 0, result.output
+    assert mock_subprocess.called, "Expected os.system to be called"
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert "AWS-StartPortForwardingSessionToRemoteHost" in call_arg
+    assert 'host="my-docdb-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com"' in call_arg
+    assert 'portNumber="27017"' in call_arg
+    assert "--region us-west-2" in call_arg
+    assert "Connecting to production DocumentDB" in result.output
+
+
+def test_docdb_local_port_override(runner, aws_connect, cwd_with_docdb_config, mock_subprocess):
+    """--local-port overrides localPortNumber while remote portNumber stays from config."""
+    result = runner.invoke(
+        aws_connect.cli, ["docdb", "--env", "production", "--local-port", "28000"]
+    )
+    assert result.exit_code == 0, result.output
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert 'localPortNumber="28000"' in call_arg
+    assert 'portNumber="27017"' in call_arg
+
+
+def test_docdb_missing_section(runner, aws_connect, cwd_with_config, mock_subprocess):
+    """No top-level 'docdb' key in environments.yaml: exit != 0, error names 'docdb'."""
+    result = runner.invoke(aws_connect.cli, ["docdb", "--env", "production"])
+    assert result.exit_code != 0
+    assert "docdb" in result.output
+    assert not mock_subprocess.called, "os.system must not run when docdb section is missing"
+
+
+def test_docdb_missing_endpoint(runner, aws_connect, cwd_with_docdb_bare_config, mock_subprocess):
+    """docdb env missing 'endpoint' key: exit != 0, error names 'endpoint'."""
+    result = runner.invoke(aws_connect.cli, ["docdb", "--env", "bare-env"])
+    assert result.exit_code != 0
+    assert "endpoint" in result.output
+    assert not mock_subprocess.called, "os.system must not run when endpoint is missing"
+
+
+def test_docdb_no_warning_when_unconfigured(runner, aws_connect, cwd_with_config, monkeypatch, tmp_path, mock_subprocess):
+    """docdb env with no 'warning' key: no warning text printed, still opens tunnel."""
+    config = textwrap.dedent("""\
+        docdb:
+          plain:
+            profile: my-profile
+            jumphost: my-jumphost
+            endpoint: my-docdb.cluster-xxxx.us-east-1.docdb.amazonaws.com
+            port: '27017'
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    aws_connect._ENVIRONMENTS_CACHE = None
+
+    result = runner.invoke(aws_connect.cli, ["docdb", "--env", "plain"])
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("\n🎯 Connecting to DocumentDB")
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert "my-docdb.cluster-xxxx.us-east-1.docdb.amazonaws.com" in call_arg
+
+
+def test_docdb_in_command_discovery(runner, aws_connect, cwd_no_config):
+    """docdb appears in --help output and shell completion is wired via _complete_env."""
+    result = runner.invoke(aws_connect.cli, ["--help"])
+    assert result.exit_code == 0, result.output
+    assert "docdb" in result.output
+
+    completions = _invoke_complete(aws_connect, "docdb")
+    assert completions == [], f"Expected [] with no config, got {completions}"
+
+
+def test_docdb_completion_offers_configured_envs(aws_connect, cwd_with_docdb_config):
+    completions = _invoke_complete(aws_connect, "docdb", incomplete="")
+    keys = [c if isinstance(c, str) else c.value for c in completions]
+    assert "production" in keys, f"Expected 'production' in completions, got {keys}"
 
 
 # ---------------------------------------------------------------------------

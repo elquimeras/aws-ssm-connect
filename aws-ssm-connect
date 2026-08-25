@@ -175,6 +175,17 @@ def _prompt_env(service, env, environments):
 # Helpers
 # ---------------------------------------------------------------------------
 
+DEFAULT_REGION = 'us-east-1'
+
+
+def _region(config):
+    """Return the per-environment region override, or DEFAULT_REGION.
+
+    Treats an absent key, `None`, and an empty string identically as "unset".
+    """
+    return str(config.get('region') or DEFAULT_REGION)
+
+
 def run_command(cmd, env=None):
     """Run a command and return the output"""
     try:
@@ -190,13 +201,13 @@ def run_command(cmd, env=None):
         return str(e), 1
 
 
-def get_instance_id(profile, jumphost_name):
+def get_instance_id(profile, jumphost_name, region=DEFAULT_REGION):
     """Get the jumphost Instance ID"""
     click.echo(f"🔍 Looking up jumphost '{jumphost_name}'...")
 
     cmd = f"""aws ec2 describe-instances \
         --profile {profile} \
-        --region us-east-1 \
+        --region {region} \
         --filters "Name=instance-state-name,Values=running" \
                   "Name=tag:Name,Values={jumphost_name}" \
         --query "Reservations[*].Instances[*].InstanceId" \
@@ -212,13 +223,13 @@ def get_instance_id(profile, jumphost_name):
     return output
 
 
-def get_rds_endpoint(profile, cluster_name):
+def get_rds_endpoint(profile, cluster_name, region=DEFAULT_REGION):
     """Get the RDS cluster endpoint"""
     click.echo(f"🔍 Getting RDS cluster endpoint '{cluster_name}'...")
 
     cmd = f"""aws rds describe-db-clusters \
         --profile {profile} \
-        --region us-east-1 \
+        --region {region} \
         --db-cluster-identifier {cluster_name} \
         --query 'DBClusters[0].Endpoint' \
         --output text"""
@@ -233,13 +244,13 @@ def get_rds_endpoint(profile, cluster_name):
     return output
 
 
-def get_redis_endpoint(profile, replication_group):
+def get_redis_endpoint(profile, replication_group, region=DEFAULT_REGION):
     """Get the ElastiCache primary (or configuration) endpoint."""
     click.echo(f"🔍 Getting Redis endpoint '{replication_group}'...")
 
     cmd = f"""aws elasticache describe-replication-groups \
         --profile {profile} \
-        --region us-east-1 \
+        --region {region} \
         --replication-group-id {replication_group} \
         --query 'ReplicationGroups[0]' \
         --output json"""
@@ -271,13 +282,13 @@ def get_redis_endpoint(profile, replication_group):
     return endpoint
 
 
-def get_eks_endpoint(profile, cluster_name):
+def get_eks_endpoint(profile, cluster_name, region=DEFAULT_REGION):
     """Get the EKS cluster endpoint"""
     click.echo(f"🔍 Getting EKS cluster endpoint '{cluster_name}'...")
 
     cmd = f"""aws eks describe-cluster \
         --profile {profile} \
-        --region us-east-1 \
+        --region {region} \
         --name {cluster_name} \
         --query 'cluster.endpoint' \
         --output text | sed 's|https://||'"""
@@ -292,12 +303,12 @@ def get_eks_endpoint(profile, cluster_name):
     return output
 
 
-def get_opensearch_endpoint(profile, domain_name):
+def get_opensearch_endpoint(profile, domain_name, region=DEFAULT_REGION):
     """Get the OpenSearch domain endpoint"""
     click.echo(f"🔍 Getting OpenSearch domain endpoint '{domain_name}'...")
     cmd = f"""aws opensearch describe-domain \
         --profile {profile} \
-        --region us-east-1 \
+        --region {region} \
         --domain-name {domain_name} \
         --query 'DomainStatus.Endpoint' \
         --output text"""
@@ -346,22 +357,23 @@ def rds(env, local_port):
         click.echo(f"   Available environments: {available}", err=True)
         sys.exit(1)
     config = environments['rds'][env]
+    region = _region(config)
 
     click.echo(f"\n🎯 Connecting to RDS {env.upper()}")
     click.echo(f"   Profile: {config['profile']}")
     click.echo(f"   Local port: {local_port}\n")
 
     # Get Instance ID
-    instance_id = get_instance_id(config['profile'], config['jumphost'])
+    instance_id = get_instance_id(config['profile'], config['jumphost'], region=region)
 
     # Get RDS Endpoint
     profile_cluster = config.get('profile_cluster', config['profile'])
-    rds_endpoint = get_rds_endpoint(profile_cluster, config['cluster'])
+    rds_endpoint = get_rds_endpoint(profile_cluster, config['cluster'], region=region)
 
     # Comando de conexión
     cmd = f"""aws ssm start-session \
         --profile {config['profile']} \
-        --region us-east-1 \
+        --region {region} \
         --target {instance_id} \
         --document-name AWS-StartPortForwardingSessionToRemoteHost \
         --parameters host="{rds_endpoint}",portNumber="{config['port']}",localPortNumber="{local_port}" """
@@ -387,6 +399,7 @@ def redis(env, local_port):
         click.echo(f"   Available environments: {available}", err=True)
         sys.exit(1)
     config = environments['redis'][env]
+    region = _region(config)
 
     if 'warning' in config:
         click.echo(f"\n{config['warning']}\n")
@@ -396,12 +409,12 @@ def redis(env, local_port):
     click.echo(f"   Local port: {local_port}\n")
 
     # Get Instance ID
-    instance_id = get_instance_id(config['profile'], config['jumphost'])
+    instance_id = get_instance_id(config['profile'], config['jumphost'], region=region)
 
     # Resolve remote host — cluster (AWS lookup) takes precedence over endpoint (literal)
     if config.get('cluster'):
         profile_cluster = config.get('profile_cluster', config['profile'])
-        redis_endpoint = get_redis_endpoint(profile_cluster, config['cluster'])
+        redis_endpoint = get_redis_endpoint(profile_cluster, config['cluster'], region=region)
     elif config.get('endpoint'):
         redis_endpoint = config['endpoint']
     else:
@@ -415,13 +428,64 @@ def redis(env, local_port):
     # Connection command
     cmd = f"""aws ssm start-session \
         --profile {config['profile']} \
-        --region us-east-1 \
+        --region {region} \
         --target {instance_id} \
         --document-name AWS-StartPortForwardingSessionToRemoteHost \
         --parameters host="{redis_endpoint}",portNumber="{config['port']}",localPortNumber="{local_port}" """
 
     click.echo(f"\n🔌 Starting port forwarding...")
     click.echo(f"   localhost:{local_port} → {redis_endpoint}:{config['port']}\n")
+
+    # Run interactive command
+    os.system(cmd)
+
+
+@cli.command()
+@click.option('--env', shell_complete=_complete_env('docdb'),
+              help='Environment to connect to')
+@click.option('--local-port', default=None, help='Local port (default: port from environment in environments.yaml)')
+def docdb(env, local_port):
+    """🍃 Connect to DocumentDB (port forwarding)"""
+    environments = get_environments()
+    env = _prompt_env('docdb', env, environments)
+    if 'docdb' not in environments or env not in environments['docdb']:
+        available = ', '.join(environments.get('docdb', {}).keys()) or '(none)'
+        click.echo(f"❌ Error: Environment 'docdb.{env}' not found in environments.yaml", err=True)
+        click.echo(f"   Available environments: {available}", err=True)
+        sys.exit(1)
+    config = environments['docdb'][env]
+    region = _region(config)
+
+    if not config.get('endpoint'):
+        click.echo(
+            f"❌ Error: Environment 'docdb.{env}' has no 'endpoint' in environments.yaml",
+            err=True,
+        )
+        sys.exit(1)
+
+    if 'warning' in config:
+        click.echo(f"\n{config['warning']}\n")
+
+    local_port = str(local_port or config.get('port', '27017'))
+    docdb_endpoint = config['endpoint']
+
+    click.echo(f"\n🎯 Connecting to DocumentDB {env.upper()}")
+    click.echo(f"   Profile: {config['profile']}")
+    click.echo(f"   Local port: {local_port}\n")
+
+    # Get Instance ID
+    instance_id = get_instance_id(config['profile'], config['jumphost'], region=region)
+
+    # Connection command
+    cmd = f"""aws ssm start-session \
+        --profile {config['profile']} \
+        --region {region} \
+        --target {instance_id} \
+        --document-name AWS-StartPortForwardingSessionToRemoteHost \
+        --parameters host="{docdb_endpoint}",portNumber="{config['port']}",localPortNumber="{local_port}" """
+
+    click.echo(f"\n🔌 Starting port forwarding...")
+    click.echo(f"   localhost:{local_port} → {docdb_endpoint}:{config['port']}\n")
 
     # Run interactive command
     os.system(cmd)
@@ -442,6 +506,7 @@ def eks(env, local_port, configure_kubeconfig):
         click.echo(f"   Available environments: {available}", err=True)
         sys.exit(1)
     config = environments['eks'][env]
+    region = _region(config)
     local_port = str(local_port or config.get('port', '8443'))
 
     click.echo(f"\n🎯 Connecting to EKS {env.upper()}")
@@ -450,10 +515,10 @@ def eks(env, local_port, configure_kubeconfig):
     click.echo(f"   Local port: {local_port}\n")
 
     # Get Instance ID
-    instance_id = get_instance_id(config['profile'], config['jumphost'])
+    instance_id = get_instance_id(config['profile'], config['jumphost'], region=region)
 
     # Get EKS Endpoint
-    eks_endpoint = get_eks_endpoint(config['profile'], config['cluster'])
+    eks_endpoint = get_eks_endpoint(config['profile'], config['cluster'], region=region)
 
     # Configure kubeconfig if requested (context name = profile to avoid collisions when cluster names repeat)
     if configure_kubeconfig:
@@ -464,14 +529,14 @@ def eks(env, local_port, configure_kubeconfig):
         # Update kubeconfig: use profile as context alias so contexts are unique across environments
         cmd_update = f"""aws eks update-kubeconfig \
             --profile {config['profile']} \
-            --region us-east-1 \
+            --region {region} \
             --name {config['cluster']} \
             --alias {kube_context}"""
 
         os.system(cmd_update)
 
         # Set cluster server
-        cmd_set_cluster = f"""kubectl config set-cluster arn:aws:eks:us-east-1:{account_id}:cluster/{config['cluster']} \
+        cmd_set_cluster = f"""kubectl config set-cluster arn:aws:eks:{region}:{account_id}:cluster/{config['cluster']} \
             --server=https://localhost:{local_port} \
             --insecure-skip-tls-verify=true"""
 
@@ -486,7 +551,7 @@ def eks(env, local_port, configure_kubeconfig):
     # Connection command
     cmd = f"""aws ssm start-session \
         --profile {config['profile']} \
-        --region us-east-1 \
+        --region {region} \
         --target {instance_id} \
         --document-name AWS-StartPortForwardingSessionToRemoteHost \
         --parameters host="{eks_endpoint}",portNumber="443",localPortNumber="{local_port}" """
@@ -513,20 +578,21 @@ def opensearch(env):
         click.echo(f"   Available environments: {available}", err=True)
         sys.exit(1)
     config = environments['opensearch'][env]
+    region = _region(config)
 
     click.echo(f"\n🎯 Connecting to OpenSearch {env.upper()}")
     click.echo(f"   Profile: {config['profile']}\n")
 
     # Get Instance ID
-    instance_id = get_instance_id(config['profile'], config['jumphost'])
+    instance_id = get_instance_id(config['profile'], config['jumphost'], region=region)
 
     # Get OpenSearch endpoint
-    opensearch_endpoint = get_opensearch_endpoint(config['profile'], config['domain'])
+    opensearch_endpoint = get_opensearch_endpoint(config['profile'], config['domain'], region=region)
 
     # Connection command
     cmd = f"""aws ssm start-session \
         --profile {config['profile']} \
-        --region us-east-1 \
+        --region {region} \
         --target {instance_id}"""
 
     click.echo(f"\n🔌 Starting SSM session...")
@@ -564,11 +630,12 @@ def jumphost(env):
     click.echo(f"   Profile: {config['profile']}")
     click.echo(f"   Jumphost: {config['jumphost']}\n")
 
-    instance_id = get_instance_id(config['profile'], config['jumphost'])
+    region = _region(config)
+    instance_id = get_instance_id(config['profile'], config['jumphost'], region=region)
 
     cmd = f"""aws ssm start-session \
         --profile {config['profile']} \
-        --region us-east-1 \
+        --region {region} \
         --target {instance_id}"""
 
     click.echo("\n🔌 Starting SSM session (bash on instance)...\n")
@@ -609,6 +676,7 @@ def list_instances(env):
 
     config = environments['ec2'][env]
     profile = config['profile']
+    region = _region(config)
 
     click.echo(f"\n🔍 Listing EC2 instances")
     click.echo(f"   Environment: {env.upper()}")
@@ -616,7 +684,7 @@ def list_instances(env):
 
     cmd = f"""aws ec2 describe-instances \
         --profile {profile} \
-        --region us-east-1 \
+        --region {region} \
         --filters "Name=instance-state-name,Values=running" \
         --query "Reservations[*].Instances[*].[InstanceId,Tags[?Key=='Name'].Value|[0]]" \
         --output table"""
@@ -697,7 +765,7 @@ def config_unlink():
 
 
 # Command order for --help
-_COMMAND_ORDER = ['list', 'list-instances', 'jumphost', 'rds', 'redis', 'opensearch', 'eks', 'config']
+_COMMAND_ORDER = ['list', 'list-instances', 'jumphost', 'rds', 'redis', 'docdb', 'opensearch', 'eks', 'config']
 
 
 def _list_commands(ctx):

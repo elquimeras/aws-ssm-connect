@@ -10,6 +10,7 @@ rds:
     cluster: my-cluster-name
     port: '5432'
     # profile_cluster: other-profile   # optional: different profile for the cluster
+    # region: us-west-2                # optional: defaults to us-east-1
 
 redis:
   my-environment:
@@ -19,6 +20,16 @@ redis:
     # endpoint: my-endpoint.cache.amazonaws.com  # fallback: literal endpoint, no AWS lookup
     port: '6379'
     # warning: 'Warning message'       # optional
+    # region: us-west-2                # optional: defaults to us-east-1
+
+docdb:
+  production:
+    profile: my-aws-profile
+    jumphost: My Jump Host
+    endpoint: my-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com
+    port: '27017'
+    region: us-west-2                  # optional: defaults to us-east-1
+    # warning: 'Warning message'       # optional
 
 eks:
   my-environment:
@@ -26,14 +37,17 @@ eks:
     jumphost: My Jump Host
     cluster: my-eks-cluster
     port: '8443'
+    # region: us-west-2                # optional: defaults to us-east-1
 
 opensearch:
   my-environment:
     profile: my-aws-profile
     jumphost: My Jump Host
     domain: my-domain
+    # region: us-west-2                # optional: defaults to us-east-1
 
 ec2:
   my-environment:
     profile: my-aws-profile
     jumphost: My Jump Host
+    # region: us-west-2                # optional: defaults to us-east-1

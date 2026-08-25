@@ -1,6 +1,6 @@
 # 🚀 AWS Connection Manager
 
-CLI tool to easily connect to AWS instances (RDS, ElastiCache, EKS, OpenSearch) using SSM Session Manager.
+CLI tool to easily connect to AWS instances (RDS, ElastiCache, DocumentDB, EKS, OpenSearch) using SSM Session Manager.
 
 ## 📦 Installation
 
@@ -63,6 +63,11 @@ pip install -e ".[dev]"
 ./aws-ssm-connect redis --env coffee
 ./aws-ssm-connect redis --env staging-v1 --local-port 6380
 
+# Connect to DocumentDB
+./aws-ssm-connect docdb                  # Interactive mode
+./aws-ssm-connect docdb --env production
+./aws-ssm-connect docdb --env production --local-port 28000
+
 # Connect to EKS
 ./aws-ssm-connect eks                    # Interactive mode (port forwarding only)
 ./aws-ssm-connect eks --env production
@@ -89,6 +94,16 @@ pip install -e ".[dev]"
 ```bash
 ./aws-ssm-connect redis --env production --local-port 6380
 # Will connect to localhost:6380 → Redis Production
+```
+
+### Connect to DocumentDB and query with mongosh
+```bash
+./aws-ssm-connect docdb --env production
+# Will connect localhost:27017 → DocumentDB production endpoint
+
+# In another terminal (while port forwarding is active)
+mongosh --tls --tlsCAFile global-bundle.pem --host localhost --port 27017 \
+  --username <user> --password <password>
 ```
 
 ### Connect to EKS and check nodes
@@ -138,6 +153,15 @@ redis:
     # endpoint: my-host.cache.amazonaws.com   # alternative: literal host, no AWS lookup
     port: '6379'
 
+docdb:
+  my-environment:
+    profile: my-aws-profile
+    jumphost: My Jump Host
+    endpoint: my-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com  # literal cluster DNS endpoint
+    port: '27017'
+    # region: us-west-2                  # optional, defaults to us-east-1
+    # warning: 'Connecting to production DocumentDB'  # optional
+
 eks:
   my-environment:
     profile: my-k8s-profile
@@ -146,6 +170,11 @@ eks:
     account_id: '123456789012'
     port: '8443'
 ```
+
+Every command (`rds`, `redis`, `docdb`, `eks`, `opensearch`, `ec2`) accepts an
+optional `region:` key. When set, all AWS calls for that environment (instance
+lookup, endpoint resolution, SSM session) use that region instead of the
+default `us-east-1`.
 
 Keep `environments.yaml.example` updated when adding new fields or services.
 Where the CLI looks for `environments.yaml` is documented in **Config discovery**
@@ -225,6 +254,7 @@ Ensure your AWS profiles have the following permissions:
 - `rds:DescribeDBClusters` (for RDS)
 - `eks:DescribeCluster` (for EKS)
 - `es:DescribeElasticsearchDomain` (for OpenSearch)
+- No extra DocumentDB IAM permission needed — `docdb` uses a literal `endpoint:` from config, no AWS API lookup
 
 ## 💡 Tips
 
