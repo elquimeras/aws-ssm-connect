@@ -511,6 +511,27 @@ def test_docdb_no_warning_when_unconfigured(runner, aws_connect, cwd_with_config
     assert "my-docdb.cluster-xxxx.us-east-1.docdb.amazonaws.com" in call_arg
 
 
+def test_docdb_default_port_when_missing(runner, aws_connect, cwd_with_config, monkeypatch, tmp_path, mock_subprocess):
+    """docdb env without 'port' key: defaults remote and local port to 27017, no traceback."""
+    config = textwrap.dedent("""\
+        docdb:
+          noport:
+            profile: my-profile
+            jumphost: my-jumphost
+            endpoint: my-docdb.cluster-xxxx.us-east-1.docdb.amazonaws.com
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    aws_connect._ENVIRONMENTS_CACHE = None
+
+    result = runner.invoke(aws_connect.cli, ["docdb", "--env", "noport"])
+    assert result.exit_code == 0, result.output
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert 'portNumber="27017"' in call_arg
+    assert 'localPortNumber="27017"' in call_arg
+
+
 def test_docdb_in_command_discovery(runner, aws_connect, cwd_no_config):
     """docdb appears in --help output and shell completion is wired via _complete_env."""
     result = runner.invoke(aws_connect.cli, ["--help"])

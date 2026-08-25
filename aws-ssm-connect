@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AWS Connection Manager CLI
-Tool to connect easily to AWS instances (RDS, ElastiCache, EKS, OpenSearch)
+Tool to connect easily to AWS instances (RDS, ElastiCache, DocumentDB, EKS, OpenSearch)
 """
 
 import subprocess
@@ -466,7 +466,8 @@ def docdb(env, local_port):
     if 'warning' in config:
         click.echo(f"\n{config['warning']}\n")
 
-    local_port = str(local_port or config.get('port', '27017'))
+    remote_port = str(config.get('port', '27017'))
+    local_port = str(local_port or remote_port)
     docdb_endpoint = config['endpoint']
 
     click.echo(f"\n🎯 Connecting to DocumentDB {env.upper()}")
@@ -482,10 +483,10 @@ def docdb(env, local_port):
         --region {region} \
         --target {instance_id} \
         --document-name AWS-StartPortForwardingSessionToRemoteHost \
-        --parameters host="{docdb_endpoint}",portNumber="{config['port']}",localPortNumber="{local_port}" """
+        --parameters host="{docdb_endpoint}",portNumber="{remote_port}",localPortNumber="{local_port}" """
 
     click.echo(f"\n🔌 Starting port forwarding...")
-    click.echo(f"   localhost:{local_port} → {docdb_endpoint}:{config['port']}\n")
+    click.echo(f"   localhost:{local_port} → {docdb_endpoint}:{remote_port}\n")
 
     # Run interactive command
     os.system(cmd)

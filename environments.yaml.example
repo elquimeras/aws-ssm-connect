@@ -28,7 +28,7 @@ docdb:
     jumphost: My Jump Host
     endpoint: my-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com
     port: '27017'
-    region: us-west-2                  # optional: defaults to us-east-1
+    # region: us-west-2                # optional: defaults to us-east-1
     # warning: 'Warning message'       # optional
 
 eks:
