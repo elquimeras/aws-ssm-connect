@@ -922,9 +922,9 @@ def test_config_env_var_directory_skipped(runner, aws_connect, monkeypatch, tmp_
 
 
 def test_wrapper_entrypoint_help_subprocess():
-    """`./aws-ssm-connect --help` runs as a real subprocess from the repo root,
-    exits 0, and prints Click usage text — regardless of whether the file is
-    still the duplicated CLI body or the thin wrapper."""
+    """The aws-ssm-connect wrapper runs as a real subprocess from the repo root
+    (via the test interpreter, not the shebang), exits 0, and prints Click
+    usage text — proving the checked-in entry point stays executable."""
     wrapper = REPO_ROOT / "aws-ssm-connect"
     assert os.access(wrapper, os.X_OK), f"Expected {wrapper} to be executable"
 

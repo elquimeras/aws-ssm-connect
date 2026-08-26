@@ -50,6 +50,10 @@ uv run ./aws-ssm-connect --help
 `aws-ssm-connect` is a thin wrapper that imports and runs the CLI defined in
 `aws_connect.py`; the dependencies above are still required for it to work.
 
+> The Usage examples below invoke `./aws-ssm-connect` directly, which assumes
+> an activated environment (or a global install). In the checkout flow, prefix
+> them with `uv run` — e.g. `uv run ./aws-ssm-connect list`.
+
 ## 🎯 Usage
 
 ### Available commands

@@ -8,7 +8,9 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 try:
     from aws_connect import cli
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name != "aws_connect":
+        raise
     print("❌ Error: aws_connect.py not found next to this wrapper.", file=sys.stderr)
     print("   Run it from a full checkout of the repository.", file=sys.stderr)
     sys.exit(1)
