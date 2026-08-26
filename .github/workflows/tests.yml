@@ -1,5 +1,10 @@
 name: tests
 
+# Actions are pinned to a full commit SHA rather than a tag. Tags are mutable and
+# can be repointed upstream, so a tag reference lets CI silently start running
+# different code; only a SHA is immutable. The trailing comment records the human
+# readable version, and .github/dependabot.yml keeps the SHAs from going stale.
+
 on:
   pull_request:
   push:
@@ -31,14 +36,14 @@ jobs:
           - "3.12"
           - "3.13"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # hatch-vcs derives the version from git tags. Without full history the
           # build still succeeds but reports a wrong version (0.1.devN instead of
           # the real tag), so fetch tags rather than a shallow clone.
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
 
@@ -69,11 +74,11 @@ jobs:
     name: click floor (8.0.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
 
