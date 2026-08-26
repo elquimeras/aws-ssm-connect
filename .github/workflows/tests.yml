@@ -1,0 +1,95 @@
+name: tests
+
+# Actions are pinned to a full commit SHA rather than a tag. Tags are mutable and
+# can be repointed upstream, so a tag reference lets CI silently start running
+# different code; only a SHA is immutable. The trailing comment records the human
+# readable version, and .github/dependabot.yml keeps the SHAs from going stale.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # `pyproject.toml` declares `click>=8.0.0` with no upper bound and no committed
+  # lockfile, so the resolved click version is decided by the interpreter: Python
+  # 3.8/3.9 cap at click 8.1.x, while 3.10+ resolve to click 8.2 or newer. Click
+  # 8.2 removed the `CliRunner(mix_stderr=...)` parameter that the `runner`
+  # fixture probes for, so both sides of that boundary must stay green.
+  suite:
+    name: python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.8"  # floor declared by requires-python
+          - "3.9"
+          - "3.10" # lowest version that resolves click >= 8.2
+          - "3.12"
+          - "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # hatch-vcs derives the version from git tags. Without full history the
+          # build still succeeds but reports a wrong version (0.1.devN instead of
+          # the real tag), so fetch tags rather than a shallow clone.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Create environment
+        run: uv venv --python ${{ matrix.python-version }}
+
+      - name: Install project and test dependencies
+        run: uv pip install -e ".[dev]"
+
+      - name: Report resolved versions
+        run: |
+          .venv/bin/python - <<'PY'
+          import importlib.metadata as md
+          import sys
+          print("python", sys.version.split()[0])
+          for pkg in ("click", "pyyaml", "aws-ssm-connect"):
+              print(pkg, md.version(pkg))
+          PY
+
+      - name: Run test suite
+        run: .venv/bin/python -m pytest tests/ -q
+
+  # Guards the lower bound declared in `pyproject.toml`. Without this job
+  # `click>=8.0.0` is an untested claim: every matrix entry above resolves to the
+  # newest compatible click, so a change that silently requires a later API would
+  # still pass while breaking anyone who already has click 8.0.x installed.
+  click-floor:
+    name: click floor (8.0.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Create environment
+        run: uv venv --python 3.8
+
+      - name: Install project and test dependencies
+        run: uv pip install -e ".[dev]"
+
+      - name: Downgrade click to the declared minimum
+        run: uv pip install "click==8.0.0"
+
+      - name: Run test suite
+        run: .venv/bin/python -m pytest tests/ -q
