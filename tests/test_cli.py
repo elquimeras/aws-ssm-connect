@@ -215,8 +215,9 @@ def test_list_no_config(runner, aws_connect, cwd_no_config):
 def _combined_output(result):
     """stdout+stderr union — for negative assertions only (e.g. 'Traceback' not
     in output); a leaked traceback must fail the test regardless of which
-    stream it lands on. Positive message assertions must use result.stderr
-    directly, since aws_connect.py's error paths write via click.echo(err=True)."""
+    stream it lands on. Positive assertions must target the stream the message
+    is actually written to: result.stderr for click.echo(..., err=True) error
+    paths, result.stdout for plain click.echo() output."""
     return (result.stdout or "") + (result.stderr or "")
 
 
