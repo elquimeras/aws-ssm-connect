@@ -48,14 +48,37 @@ def _invoke_complete(aws_connect, service, incomplete=""):
 
 
 # ---------------------------------------------------------------------------
+# Fixture self-check — runner separates stdout/stderr (R5)
+# ---------------------------------------------------------------------------
+
+
+def test_runner_separates_stdout_and_stderr(runner):
+    """The `runner` fixture must always yield separately readable stdout/stderr,
+    on both sides of the click 8.2 API cliff (mix_stderr removed)."""
+    import click
+
+    @click.command()
+    def _probe():
+        click.echo("to-stdout")
+        click.echo("to-stderr", err=True)
+
+    result = runner.invoke(_probe, [])
+    assert result.exit_code == 0
+    assert "to-stdout" in result.stdout
+    assert "to-stderr" not in result.stdout
+    assert "to-stderr" in result.stderr
+    assert "to-stdout" not in result.stderr
+
+
+# ---------------------------------------------------------------------------
 # Phase 4.1 — help root no config: exit 0, no Traceback (R2)
 # ---------------------------------------------------------------------------
 
 
 def test_help_root_no_config(runner, aws_connect, cwd_no_config):
     result = runner.invoke(aws_connect.cli, ["--help"])
-    assert result.exit_code == 0, result.output
-    assert "Traceback" not in (result.output or "")
+    assert result.exit_code == 0, result.stdout
+    assert "Traceback" not in _combined_output(result)
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +92,8 @@ def test_help_root_no_config(runner, aws_connect, cwd_no_config):
 )
 def test_help_subcommands_no_config(runner, aws_connect, cwd_no_config, subcommand):
     result = runner.invoke(aws_connect.cli, [subcommand, "--help"])
-    assert result.exit_code == 0, f"{subcommand}: {result.output}"
-    assert "Traceback" not in (result.output or "")
+    assert result.exit_code == 0, f"{subcommand}: {result.stdout}"
+    assert "Traceback" not in _combined_output(result)
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +140,15 @@ def test_env_completion_present_config(aws_connect, cwd_with_config):
 def test_real_command_missing_config(runner, aws_connect, cwd_no_config):
     result = runner.invoke(aws_connect.cli, ["rds", "--env", "staging"])
     assert result.exit_code != 0, "Expected non-zero exit when config is missing"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "environments.yaml" in output, f"Expected 'environments.yaml' in output: {output!r}"
-    assert "cp environments.yaml.example environments.yaml" in output, (
-        f"Expected copy hint in output: {output!r}"
+    assert "environments.yaml" in result.stderr, (
+        f"Expected 'environments.yaml' in stderr: {result.stderr!r}"
     )
-    assert "Traceback" not in output, f"Traceback found in output: {output!r}"
+    assert "cp environments.yaml.example environments.yaml" in result.stderr, (
+        f"Expected copy hint in stderr: {result.stderr!r}"
+    )
+    assert "Traceback" not in _combined_output(result), (
+        f"Traceback found in output: {_combined_output(result)!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -133,9 +159,12 @@ def test_real_command_missing_config(runner, aws_connect, cwd_no_config):
 def test_real_command_malformed_config(runner, aws_connect, cwd_malformed_config):
     result = runner.invoke(aws_connect.cli, ["rds", "--env", "staging"])
     assert result.exit_code != 0, "Expected non-zero exit when config is malformed"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "environments.yaml" in output, f"Expected 'environments.yaml' in output: {output!r}"
-    assert "Traceback" not in output, f"Traceback found in output: {output!r}"
+    assert "environments.yaml" in result.stderr, (
+        f"Expected 'environments.yaml' in stderr: {result.stderr!r}"
+    )
+    assert "Traceback" not in _combined_output(result), (
+        f"Traceback found in output: {_combined_output(result)!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +191,7 @@ def test_behavior_preservation_rds(runner, aws_connect, cwd_with_config, mock_su
     assert "ssm start-session" in call_args, (
         f"Expected 'ssm start-session' in os.system call: {call_args!r}"
     )
-    assert result.exit_code == 0, f"Expected exit 0, got {result.exit_code}: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0, got {result.exit_code}: {result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +202,9 @@ def test_behavior_preservation_rds(runner, aws_connect, cwd_with_config, mock_su
 def test_list_no_config(runner, aws_connect, cwd_no_config):
     result = runner.invoke(aws_connect.cli, ["list"])
     assert result.exit_code != 0, "Expected non-zero exit for list when config is missing"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "environments.yaml" in output, f"Expected 'environments.yaml' in output: {output!r}"
+    assert "environments.yaml" in result.stderr, (
+        f"Expected 'environments.yaml' in stderr: {result.stderr!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +213,12 @@ def test_list_no_config(runner, aws_connect, cwd_no_config):
 
 
 def _combined_output(result):
-    return (result.output or "") + (
-        result.stderr if hasattr(result, "stderr") and result.stderr else ""
-    )
+    """stdout+stderr union — for negative assertions only (e.g. 'Traceback' not
+    in output); a leaked traceback must fail the test regardless of which
+    stream it lands on. Positive assertions must target the stream the message
+    is actually written to: result.stderr for click.echo(..., err=True) error
+    paths, result.stdout for plain click.echo() output."""
+    return (result.stdout or "") + (result.stderr or "")
 
 
 @pytest.mark.parametrize("command", ["jumphost", "list-instances"])
@@ -193,10 +226,9 @@ def test_invalid_env_valid_config(runner, aws_connect, cwd_with_config, command)
     """Wrong --env against valid config: exit≠0, 'not found', available list, no Traceback."""
     result = runner.invoke(aws_connect.cli, [command, "--env", "does-not-exist"])
     assert result.exit_code != 0, f"{command}: expected non-zero exit for unknown env"
-    output = _combined_output(result)
-    assert "not found" in output, f"{command}: expected 'not found' message: {output!r}"
-    assert "staging" in output, f"{command}: expected available env 'staging' listed: {output!r}"
-    assert "Traceback" not in output, f"{command}: Traceback found: {output!r}"
+    assert "not found" in result.stderr, f"{command}: expected 'not found' message: {result.stderr!r}"
+    assert "staging" in result.stderr, f"{command}: expected available env 'staging' listed: {result.stderr!r}"
+    assert "Traceback" not in _combined_output(result), f"{command}: Traceback found: {_combined_output(result)!r}"
 
 
 def test_interactive_prompt_lists_envs(runner, aws_connect, cwd_with_config, mock_subprocess):
@@ -206,11 +238,11 @@ def test_interactive_prompt_lists_envs(runner, aws_connect, cwd_with_config, moc
     not turn the prompt into a bare 'Environment:').
     """
     result = runner.invoke(aws_connect.cli, ["rds"], input="staging\n")
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     # Click renders a Choice prompt as "Environment (prod, staging): "
-    assert "Environment (" in result.output, f"Prompt did not list choices: {result.output!r}"
-    assert "staging" in result.output and "prod" in result.output, (
-        f"Available envs not shown in prompt: {result.output!r}"
+    assert "Environment (" in result.stdout, f"Prompt did not list choices: {result.stdout!r}"
+    assert "staging" in result.stdout and "prod" in result.stdout, (
+        f"Available envs not shown in prompt: {result.stdout!r}"
     )
 
 
@@ -218,9 +250,8 @@ def test_interactive_prompt_no_config_section(runner, aws_connect, cwd_config_no
     """No envs for the service → interactive prompt errors cleanly, no Traceback."""
     result = runner.invoke(aws_connect.cli, ["redis"], input="\n")
     assert result.exit_code != 0
-    output = _combined_output(result)
-    assert "redis" in output, f"Expected 'redis' referenced: {output!r}"
-    assert "Traceback" not in output, f"Traceback found: {output!r}"
+    assert "redis" in result.stderr, f"Expected 'redis' referenced: {result.stderr!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
 
 
 @pytest.mark.parametrize("command", ["jumphost", "list-instances"])
@@ -228,9 +259,8 @@ def test_missing_ec2_section(runner, aws_connect, cwd_config_no_ec2, command):
     """Config without an 'ec2' section: exit≠0, friendly message, no Traceback."""
     result = runner.invoke(aws_connect.cli, [command, "--env", "staging"])
     assert result.exit_code != 0, f"{command}: expected non-zero exit when 'ec2' section missing"
-    output = _combined_output(result)
-    assert "ec2" in output, f"{command}: expected 'ec2' referenced in message: {output!r}"
-    assert "Traceback" not in output, f"{command}: Traceback found: {output!r}"
+    assert "ec2" in result.stderr, f"{command}: expected 'ec2' referenced in message: {result.stderr!r}"
+    assert "Traceback" not in _combined_output(result), f"{command}: Traceback found: {_combined_output(result)!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -244,13 +274,13 @@ def test_redis_cluster_primary_endpoint(
     """cluster env + PrimaryEndpoint: SSM command uses primary address; exit 0."""
     mock_os_system, _ = mock_subprocess_elasticache_primary
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "cluster-env"])
-    assert result.exit_code == 0, f"Expected exit 0: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0: {result.stdout}"
     assert mock_os_system.called, "Expected os.system to be called"
     call_arg = mock_os_system.call_args[0][0]
     assert 'host="primary.cache.example.com"' in call_arg, (
         f"Expected primary address in SSM host= parameter: {call_arg!r}"
     )
-    assert "Traceback" not in result.output, f"Traceback found: {result.output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
 
 
 def test_redis_cluster_config_endpoint_fallback(
@@ -259,13 +289,13 @@ def test_redis_cluster_config_endpoint_fallback(
     """cluster env + ConfigurationEndpoint (PrimaryEndpoint null): SSM command uses config address; exit 0."""
     mock_os_system, _ = mock_subprocess_elasticache_config_ep
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "cluster-env"])
-    assert result.exit_code == 0, f"Expected exit 0: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0: {result.stdout}"
     assert mock_os_system.called, "Expected os.system to be called"
     call_arg = mock_os_system.call_args[0][0]
     assert 'host="config.cache.example.com"' in call_arg, (
         f"Expected configuration endpoint in SSM host= parameter: {call_arg!r}"
     )
-    assert "Traceback" not in result.output, f"Traceback found: {result.output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
 
 
 def test_redis_cluster_aws_failure(
@@ -275,10 +305,9 @@ def test_redis_cluster_aws_failure(
     mock_os_system, mock_run = mock_subprocess_elasticache_failure
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "cluster-env"])
     assert result.exit_code != 0, f"Expected non-zero exit on AWS failure, got {result.exit_code}"
-    output = _combined_output(result)
-    assert "Traceback" not in output, f"Traceback found: {output!r}"
-    assert "Redis endpoint" in output or "Error" in output, (
-        f"Expected friendly error message: {output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
+    assert "Redis endpoint" in result.stderr or "Error" in result.stderr, (
+        f"Expected friendly error message: {result.stderr!r}"
     )
     # the elasticache lookup must actually have been attempted (guards against
     # side_effect desync feeding the wrong mock return to the wrong call)
@@ -304,10 +333,9 @@ def test_redis_cluster_group_not_found_null(
         f"Uncaught AttributeError from null AWS response: {result.exception!r}"
     )
     assert result.exit_code != 0, f"Expected non-zero exit, got {result.exit_code}"
-    output = _combined_output(result)
-    assert "Traceback" not in output, f"Traceback found: {output!r}"
-    assert "Redis endpoint" in output or "Error" in output, (
-        f"Expected friendly error message: {output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
+    assert "Redis endpoint" in result.stderr or "Error" in result.stderr, (
+        f"Expected friendly error message: {result.stderr!r}"
     )
     assert not mock_os_system.called, "os.system must not run when the group is not found"
 
@@ -317,7 +345,7 @@ def test_redis_endpoint_literal_no_aws_call(
 ):
     """endpoint-only env: SSM uses literal endpoint; no describe-replication-groups call made."""
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "staging"])
-    assert result.exit_code == 0, f"Expected exit 0: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0: {result.stdout}"
     # os.system must have been called with the literal endpoint
     call_arg = mock_subprocess.call_args[0][0]
     assert "my-endpoint.cache.amazonaws.com" in call_arg, (
@@ -332,7 +360,7 @@ def test_redis_endpoint_literal_no_aws_call(
     assert not elasticache_calls, (
         f"run_command was called with describe-replication-groups unexpectedly: {elasticache_calls}"
     )
-    assert "Traceback" not in result.output, f"Traceback found: {result.output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
 
 
 def test_redis_neither_cluster_nor_endpoint(
@@ -341,10 +369,9 @@ def test_redis_neither_cluster_nor_endpoint(
     """env with neither cluster nor endpoint: exit≠0, friendly error, no Traceback."""
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "bare-env"])
     assert result.exit_code != 0, f"Expected non-zero exit, got {result.exit_code}"
-    output = _combined_output(result)
-    assert "Traceback" not in output, f"Traceback found: {output!r}"
-    assert "cluster" in output or "endpoint" in output, (
-        f"Expected friendly error mentioning missing keys: {output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
+    assert "cluster" in result.stderr or "endpoint" in result.stderr, (
+        f"Expected friendly error mentioning missing keys: {result.stderr!r}"
     )
 
 
@@ -363,7 +390,7 @@ def test_region_default_when_absent(runner, aws_connect, cwd_with_config, mock_s
     """No 'region' key configured: existing commands keep using DEFAULT_REGION
     (us-east-1) in the SSM command — behavior preservation for the refactor."""
     result = runner.invoke(aws_connect.cli, [command, "--env", env])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     call_arg = _ssm_call_arg(mock_subprocess)
     assert "--region us-east-1" in call_arg, (
         f"Expected default region in SSM command: {call_arg!r}"
@@ -373,7 +400,7 @@ def test_region_default_when_absent(runner, aws_connect, cwd_with_config, mock_s
 def test_region_override_redis(runner, aws_connect, cwd_with_region_config, mock_subprocess):
     """redis env with 'region: us-west-2' propagates into the SSM command."""
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "region-env"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     call_arg = _ssm_call_arg(mock_subprocess)
     assert "--region us-west-2" in call_arg, (
         f"Expected overridden region in SSM command: {call_arg!r}"
@@ -390,7 +417,7 @@ def test_region_override_reaches_instance_lookup(runner, aws_connect, cwd_with_r
     monkeypatch.setattr(aws_connect, "run_command", mock_run)
     monkeypatch.setattr("os.system", MagicMock(return_value=0))
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "region-env"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     lookup_cmd = mock_run.call_args_list[0][0][0]
     assert "--region us-west-2" in lookup_cmd, (
         f"Expected instance lookup to use overridden region: {lookup_cmd!r}"
@@ -400,7 +427,7 @@ def test_region_override_reaches_instance_lookup(runner, aws_connect, cwd_with_r
 def test_region_absent_never_produces_none_token(runner, aws_connect, cwd_with_config, mock_subprocess):
     """Absent region must resolve to the default, never leak a literal 'None'."""
     result = runner.invoke(aws_connect.cli, ["redis", "--env", "staging"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     call_arg = _ssm_call_arg(mock_subprocess)
     assert "--region None" not in call_arg, f"Leaked '--region None': {call_arg!r}"
 
@@ -439,7 +466,7 @@ def test_region_eks_kubeconfig_arn_and_flag(runner, aws_connect, monkeypatch, tm
     result = runner.invoke(
         aws_connect.cli, ["eks", "--env", "region-env", "--configure-kubeconfig"]
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     joined = "\n".join(calls)
     assert "arn:aws:eks:eu-west-1:123456789012:cluster/my-eks-cluster" in joined, (
         f"Expected region-aware kubeconfig ARN: {joined!r}"
@@ -458,14 +485,14 @@ def test_docdb_valid_env_opens_tunnel(runner, aws_connect, cwd_with_docdb_config
     """Valid docdb env: resolves jumphost, starts SSM port-forwarding session to
     the literal endpoint:port, prints warning, exit 0."""
     result = runner.invoke(aws_connect.cli, ["docdb", "--env", "production"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     assert mock_subprocess.called, "Expected os.system to be called"
     call_arg = _ssm_call_arg(mock_subprocess)
     assert "AWS-StartPortForwardingSessionToRemoteHost" in call_arg
     assert 'host="my-docdb-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com"' in call_arg
     assert 'portNumber="27017"' in call_arg
     assert "--region us-west-2" in call_arg
-    assert "Connecting to production DocumentDB" in result.output
+    assert "Connecting to production DocumentDB" in result.stdout
 
 
 def test_docdb_local_port_override(runner, aws_connect, cwd_with_docdb_config, mock_subprocess):
@@ -473,7 +500,7 @@ def test_docdb_local_port_override(runner, aws_connect, cwd_with_docdb_config, m
     result = runner.invoke(
         aws_connect.cli, ["docdb", "--env", "production", "--local-port", "28000"]
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     call_arg = _ssm_call_arg(mock_subprocess)
     assert 'localPortNumber="28000"' in call_arg
     assert 'portNumber="27017"' in call_arg
@@ -483,7 +510,7 @@ def test_docdb_missing_section(runner, aws_connect, cwd_with_config, mock_subpro
     """No top-level 'docdb' key in environments.yaml: exit != 0, error names 'docdb'."""
     result = runner.invoke(aws_connect.cli, ["docdb", "--env", "production"])
     assert result.exit_code != 0
-    assert "docdb" in result.output
+    assert "docdb" in result.stderr
     assert not mock_subprocess.called, "os.system must not run when docdb section is missing"
 
 
@@ -491,7 +518,7 @@ def test_docdb_missing_endpoint(runner, aws_connect, cwd_with_docdb_bare_config,
     """docdb env missing 'endpoint' key: exit != 0, error names 'endpoint'."""
     result = runner.invoke(aws_connect.cli, ["docdb", "--env", "bare-env"])
     assert result.exit_code != 0
-    assert "endpoint" in result.output
+    assert "endpoint" in result.stderr
     assert not mock_subprocess.called, "os.system must not run when endpoint is missing"
 
 
@@ -511,8 +538,8 @@ def test_docdb_no_warning_when_unconfigured(runner, aws_connect, cwd_with_config
     aws_connect._ENVIRONMENTS_CACHE = None
 
     result = runner.invoke(aws_connect.cli, ["docdb", "--env", "plain"])
-    assert result.exit_code == 0, result.output
-    assert result.output.startswith("\n🎯 Connecting to DocumentDB")
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout.startswith("\n🎯 Connecting to DocumentDB")
     call_arg = _ssm_call_arg(mock_subprocess)
     assert "my-docdb.cluster-xxxx.us-east-1.docdb.amazonaws.com" in call_arg
 
@@ -532,7 +559,7 @@ def test_docdb_default_port_when_missing(runner, aws_connect, cwd_with_config, m
     aws_connect._ENVIRONMENTS_CACHE = None
 
     result = runner.invoke(aws_connect.cli, ["docdb", "--env", "noport"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.stdout
     call_arg = _ssm_call_arg(mock_subprocess)
     assert 'portNumber="27017"' in call_arg
     assert 'localPortNumber="27017"' in call_arg
@@ -541,8 +568,8 @@ def test_docdb_default_port_when_missing(runner, aws_connect, cwd_with_config, m
 def test_docdb_in_command_discovery(runner, aws_connect, cwd_no_config):
     """docdb appears in --help output and shell completion is wired via _complete_env."""
     result = runner.invoke(aws_connect.cli, ["--help"])
-    assert result.exit_code == 0, result.output
-    assert "docdb" in result.output
+    assert result.exit_code == 0, result.stdout
+    assert "docdb" in result.stdout
 
     completions = _invoke_complete(aws_connect, "docdb")
     assert completions == [], f"Expected [] with no config, got {completions}"
@@ -659,14 +686,13 @@ def test_config_none_raises_ConfigMissingError(runner, aws_connect, monkeypatch,
 
     result = runner.invoke(aws_connect.cli, ["rds", "--env", "staging"])
     assert result.exit_code != 0, "Expected non-zero exit when all config tiers absent"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "environments.yaml" in output, f"Expected 'environments.yaml' in error output: {output!r}"
+    assert "environments.yaml" in result.stderr, f"Expected 'environments.yaml' in stderr: {result.stderr!r}"
     # Message must enumerate ALL searched tiers (it is the sole user guidance)
-    assert "Searched locations" in output, f"Expected 'Searched locations' header: {output!r}"
-    assert "AWS_CONNECT_CONFIG" in output, f"Expected tier-1 (env var) listed: {output!r}"
-    assert "./environments.yaml" in output, f"Expected tier-2 (cwd) listed: {output!r}"
-    assert "aws-ssm-connect" in output, f"Expected tier-3 (XDG) path listed: {output!r}"
-    assert "Traceback" not in output, f"Traceback found in output: {output!r}"
+    assert "Searched locations" in result.stderr, f"Expected 'Searched locations' header: {result.stderr!r}"
+    assert "AWS_CONNECT_CONFIG" in result.stderr, f"Expected tier-1 (env var) listed: {result.stderr!r}"
+    assert "./environments.yaml" in result.stderr, f"Expected tier-2 (cwd) listed: {result.stderr!r}"
+    assert "aws-ssm-connect" in result.stderr, f"Expected tier-3 (XDG) path listed: {result.stderr!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found in output: {_combined_output(result)!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -677,23 +703,23 @@ def test_config_none_raises_ConfigMissingError(runner, aws_connect, monkeypatch,
 def test_config_link_help_no_config(runner, aws_connect):
     """config link --help exits 0 and no Traceback — even when environments.yaml absent."""
     result = runner.invoke(aws_connect.cli, ["config", "link", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "Traceback" not in (result.output or "")
+    assert result.exit_code == 0, result.stdout
+    assert "Traceback" not in _combined_output(result)
 
 
 def test_config_unlink_help_no_config(runner, aws_connect):
     """config unlink --help exits 0 and no Traceback."""
     result = runner.invoke(aws_connect.cli, ["config", "unlink", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "Traceback" not in (result.output or "")
+    assert result.exit_code == 0, result.stdout
+    assert "Traceback" not in _combined_output(result)
 
 
 def test_config_link_creates_symlink(runner, aws_connect, linkable_source, monkeypatch, tmp_path):
     """config link <source> creates a symlink at the XDG target; exit 0."""
     # Run link with an explicit source path
     result = runner.invoke(aws_connect.cli, ["config", "link", str(linkable_source)])
-    assert result.exit_code == 0, f"Expected exit 0: {result.output}"
-    assert "Traceback" not in (result.output or "")
+    assert result.exit_code == 0, f"Expected exit 0: {result.stdout}"
+    assert "Traceback" not in _combined_output(result)
 
     # The symlink must now exist at _xdg_config_path()
     target = aws_connect._xdg_config_path()
@@ -711,7 +737,7 @@ def test_config_link_default_source(runner, aws_connect, linkable_source, monkey
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(aws_connect.cli, ["config", "link"])
-    assert result.exit_code == 0, f"Expected exit 0 with default source: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0 with default source: {result.stdout}"
     target = aws_connect._xdg_config_path()
     assert os.path.islink(target), f"Expected symlink at {target} when using default source"
 
@@ -721,11 +747,10 @@ def test_config_link_source_not_found(runner, aws_connect, tmp_path):
     missing = str(tmp_path / "does_not_exist.yaml")
     result = runner.invoke(aws_connect.cli, ["config", "link", missing])
     assert result.exit_code != 0, "Expected non-zero exit for missing source"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "Error" in output or "not found" in output.lower(), (
-        f"Expected friendly error in output: {output!r}"
+    assert "Error" in result.stderr or "not found" in result.stderr.lower(), (
+        f"Expected friendly error in stderr: {result.stderr!r}"
     )
-    assert "Traceback" not in output, f"Traceback found: {output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback found: {_combined_output(result)!r}"
     # No symlink must have been created
     target = aws_connect._xdg_config_path()
     assert not os.path.exists(target), f"Symlink must not be created for missing source: {target}"
@@ -734,17 +759,17 @@ def test_config_link_source_not_found(runner, aws_connect, tmp_path):
 def test_config_link_idempotent_same_symlink(runner, aws_connect, linkable_source):
     """config link called twice with the same source is idempotent; exit 0 both times."""
     result1 = runner.invoke(aws_connect.cli, ["config", "link", str(linkable_source)])
-    assert result1.exit_code == 0, f"First link failed: {result1.output}"
+    assert result1.exit_code == 0, f"First link failed: {result1.stdout}"
 
     target = aws_connect._xdg_config_path()
     link_before = os.readlink(target)
 
     result2 = runner.invoke(aws_connect.cli, ["config", "link", str(linkable_source)])
-    assert result2.exit_code == 0, f"Second link (idempotent) failed: {result2.output}"
-    assert "Traceback" not in (result2.output or "")
+    assert result2.exit_code == 0, f"Second link (idempotent) failed: {result2.stdout}"
+    assert "Traceback" not in _combined_output(result2)
     # Idempotent: the symlink must be untouched (same link target) after re-link
     assert os.readlink(target) == link_before, "Re-link must not modify the existing symlink"
-    assert "Already linked" in (result2.output or ""), "Expected the idempotent no-op message"
+    assert "Already linked" in (result2.stdout or ""), "Expected the idempotent no-op message"
 
 
 def test_config_link_different_symlink_refuses_without_force(
@@ -757,16 +782,15 @@ def test_config_link_different_symlink_refuses_without_force(
 
     # Link to linkable_source first
     result1 = runner.invoke(aws_connect.cli, ["config", "link", str(linkable_source)])
-    assert result1.exit_code == 0, result1.output
+    assert result1.exit_code == 0, result1.stdout
 
     # Try to link to other_source without --force
     result2 = runner.invoke(aws_connect.cli, ["config", "link", str(other_source)])
     assert result2.exit_code != 0, "Expected non-zero exit when replacing symlink without --force"
-    output = (result2.output or "") + (result2.stderr if hasattr(result2, "stderr") and result2.stderr else "")
-    assert "force" in output.lower() or "--force" in output, (
-        f"Expected --force hint in error: {output!r}"
+    assert "force" in result2.stderr.lower() or "--force" in result2.stderr, (
+        f"Expected --force hint in error: {result2.stderr!r}"
     )
-    assert "Traceback" not in output
+    assert "Traceback" not in _combined_output(result2)
     # The original symlink must be UNCHANGED after the refusal
     target = aws_connect._xdg_config_path()
     assert os.path.realpath(target) == os.path.realpath(str(linkable_source)), (
@@ -783,7 +807,7 @@ def test_config_link_different_symlink_replaced_with_force(
 
     runner.invoke(aws_connect.cli, ["config", "link", str(linkable_source)])
     result = runner.invoke(aws_connect.cli, ["config", "link", "--force", str(other_source)])
-    assert result.exit_code == 0, f"Expected exit 0 with --force: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0 with --force: {result.stdout}"
 
     target = aws_connect._xdg_config_path()
     assert os.path.realpath(target) == os.path.realpath(str(other_source)), (
@@ -801,11 +825,10 @@ def test_config_link_real_file_refuses_without_force(runner, aws_connect, linkab
 
     result = runner.invoke(aws_connect.cli, ["config", "link", str(linkable_source)])
     assert result.exit_code != 0, "Expected non-zero exit when target is a real file without --force"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "force" in output.lower() or "--force" in output, (
-        f"Expected --force hint in error: {output!r}"
+    assert "force" in result.stderr.lower() or "--force" in result.stderr, (
+        f"Expected --force hint in error: {result.stderr!r}"
     )
-    assert "Traceback" not in output
+    assert "Traceback" not in _combined_output(result)
     # The real file must be UNCHANGED after the refusal (not clobbered, still a file)
     assert not os.path.islink(target), "Refused link must not turn the real file into a symlink"
     assert open(target).read() == "rds: {}\n", "Refused link must leave the real file untouched"
@@ -822,9 +845,9 @@ def test_config_link_real_file_replaced_with_force(runner, aws_connect, linkable
         f.write("rds: {}\n")
 
     result = runner.invoke(aws_connect.cli, ["config", "link", "--force", str(linkable_source)])
-    assert result.exit_code == 0, f"Expected exit 0 with --force on real file: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0 with --force on real file: {result.stdout}"
     assert os.path.islink(target), "Expected symlink after --force on real file"
-    assert "Traceback" not in (result.output or "")
+    assert "Traceback" not in _combined_output(result)
 
 
 def test_config_link_directory_at_target_refuses(runner, aws_connect, linkable_source):
@@ -833,12 +856,11 @@ def test_config_link_directory_at_target_refuses(runner, aws_connect, linkable_s
     os.makedirs(target, exist_ok=True)  # the target path itself is a directory
     result = runner.invoke(aws_connect.cli, ["config", "link", "--force", str(linkable_source)])
     assert result.exit_code != 0, "Expected non-zero exit when the target is a directory"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "Traceback" not in output, f"Traceback leaked: {output!r}"
-    assert "IsADirectoryError" not in output and "NotADirectoryError" not in output, (
-        f"Raw OS error leaked: {output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback leaked: {_combined_output(result)!r}"
+    assert "IsADirectoryError" not in _combined_output(result) and "NotADirectoryError" not in _combined_output(result), (
+        f"Raw OS error leaked: {_combined_output(result)!r}"
     )
-    assert "directory" in output.lower(), f"Expected a friendly 'directory' message: {output!r}"
+    assert "directory" in result.stderr.lower(), f"Expected a friendly 'directory' message: {result.stderr!r}"
     os.rmdir(target)  # cleanup
 
 
@@ -849,12 +871,12 @@ def test_config_unlink_removes_symlink(runner, aws_connect, linkable_source):
     assert os.path.islink(target), "Pre-condition: symlink must exist before unlink"
 
     result = runner.invoke(aws_connect.cli, ["config", "unlink"])
-    assert result.exit_code == 0, f"Expected exit 0 after unlink: {result.output}"
+    assert result.exit_code == 0, f"Expected exit 0 after unlink: {result.stdout}"
     # islink (not just exists): exists() follows the link and is False for a
     # dangling link even if it was NOT removed — islink pins the real behavior.
     assert not os.path.islink(target), f"Expected symlink to be removed after unlink: {target}"
     assert not os.path.exists(target), f"Expected nothing at target after unlink: {target}"
-    assert "Traceback" not in (result.output or "")
+    assert "Traceback" not in _combined_output(result)
 
 
 def test_config_unlink_real_file_refuses(runner, aws_connect, tmp_path):
@@ -866,11 +888,10 @@ def test_config_unlink_real_file_refuses(runner, aws_connect, tmp_path):
 
     result = runner.invoke(aws_connect.cli, ["config", "unlink"])
     assert result.exit_code != 0, "Expected non-zero exit when target is a real file"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "real file" in output or "refusing" in output.lower(), (
-        f"Expected 'real file' or 'refusing' in error: {output!r}"
+    assert "real file" in result.stderr or "refusing" in result.stderr.lower(), (
+        f"Expected 'real file' or 'refusing' in error: {result.stderr!r}"
     )
-    assert "Traceback" not in output
+    assert "Traceback" not in _combined_output(result)
     # Clean up
     os.remove(target)
 
@@ -878,8 +899,8 @@ def test_config_unlink_real_file_refuses(runner, aws_connect, tmp_path):
 def test_config_unlink_absent_noop(runner, aws_connect):
     """config unlink when nothing is at the target exits 0 (no-op)."""
     result = runner.invoke(aws_connect.cli, ["config", "unlink"])
-    assert result.exit_code == 0, f"Expected exit 0 for absent target: {result.output}"
-    assert "Traceback" not in (result.output or "")
+    assert result.exit_code == 0, f"Expected exit 0 for absent target: {result.stdout}"
+    assert "Traceback" not in _combined_output(result)
 
 
 def test_config_link_then_get_environments(runner, aws_connect, linkable_source):
@@ -909,10 +930,9 @@ def test_config_env_var_directory_skipped(runner, aws_connect, monkeypatch, tmp_
 
     result = runner.invoke(aws_connect.cli, ["rds", "--env", "staging"])
     assert result.exit_code != 0, "Expected non-zero exit when env var points at a directory"
-    output = (result.output or "") + (result.stderr if hasattr(result, "stderr") and result.stderr else "")
-    assert "Traceback" not in output, f"Traceback leaked: {output!r}"
-    assert "IsADirectoryError" not in output, f"IsADirectoryError leaked: {output!r}"
-    assert "environments.yaml" in output, f"Expected friendly missing-config error: {output!r}"
+    assert "Traceback" not in _combined_output(result), f"Traceback leaked: {_combined_output(result)!r}"
+    assert "IsADirectoryError" not in _combined_output(result), f"IsADirectoryError leaked: {_combined_output(result)!r}"
+    assert "environments.yaml" in result.stderr, f"Expected friendly missing-config error: {result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------

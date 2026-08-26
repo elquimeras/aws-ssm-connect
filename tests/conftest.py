@@ -2,6 +2,7 @@
 Shared fixtures for aws-ssm-connect CLI tests.
 """
 
+import inspect
 import os
 import sys
 import textwrap
@@ -11,6 +12,15 @@ import pytest
 from click.testing import CliRunner
 
 import aws_connect
+
+
+# click < 8.2 merges stdout/stderr unless CliRunner(mix_stderr=False) is passed;
+# click >= 8.2 removed `mix_stderr` entirely and always separates the streams.
+# Probe the actual signature instead of parsing click.__version__ so forks/dev
+# builds are handled by capability, not by a version string.
+_CLIRUNNER_ACCEPTS_MIX_STDERR = (
+    "mix_stderr" in inspect.signature(CliRunner.__init__).parameters
+)
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +36,14 @@ def aws_connect():
 
 @pytest.fixture
 def runner():
-    """Click CliRunner for invoking commands in isolation."""
+    """Click CliRunner with stdout/stderr captured separately (spec R5).
+
+    click 8.2 API cliff: `mix_stderr` still exists on click < 8.2 (default True,
+    merging streams) but was removed on click >= 8.2, which always separates
+    them. Pass mix_stderr=False only when the installed click accepts it.
+    """
+    if _CLIRUNNER_ACCEPTS_MIX_STDERR:
+        return CliRunner(mix_stderr=False)
     return CliRunner()
 
 
