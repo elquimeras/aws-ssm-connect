@@ -8,8 +8,9 @@
 # service already running locally. Setting `port` to a value the remote does
 # not listen on makes the tunnel open and then die on first use.
 # Precedence: --local-port > local_port > per-command default.
-# `eks` is the exception: its remote port is always 443, so there `port` already
-# means the local port and `local_port` just overrides it.
+# `eks` has no remote port to configure (always 443), so it takes only
+# `local_port`. Its older configs used `port` for that; both still work, with
+# `local_port` winning.
 
 rds:
   my-environment:
@@ -47,8 +48,8 @@ eks:
     profile: my-k8s-profile
     jumphost: My Jump Host
     cluster: my-eks-cluster
-    port: '8443'                       # local port (the EKS remote port is always 443)
-    # local_port: '9443'               # optional: overrides `port` for the local side
+    local_port: '8443'                 # local port; EKS has no remote port to set (always 443)
+    # port: '8443'                     # legacy alias for local_port — prefer local_port
     # account_id: '123456789012'       # optional: skips an AWS lookup on --configure-kubeconfig
     # region: us-west-2                # optional: defaults to us-east-1
 

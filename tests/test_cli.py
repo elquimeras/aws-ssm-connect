@@ -1019,3 +1019,37 @@ def test_docdb_local_port_still_defaults_to_remote_port(
     result = runner.invoke(aws_connect.cli, ["docdb", "--env", "production"])
     assert result.exit_code == 0, result.stdout
     assert 'localPortNumber="27017"' in _ssm_call_arg(mock_subprocess)
+
+
+def test_eks_local_port_only_without_legacy_port(
+    runner, aws_connect, monkeypatch, tmp_path, mock_subprocess,
+):
+    """eks needs no `port` key at all: `local_port` alone drives the local side,
+    and the remote port stays the fixed 443 the EKS API server listens on."""
+    config = textwrap.dedent("""\
+        eks:
+          staging:
+            profile: my-profile
+            jumphost: my-jumphost
+            cluster: my-eks-cluster
+            local_port: '8443'
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+
+    result = runner.invoke(aws_connect.cli, ["eks", "--env", "staging"])
+    assert result.exit_code == 0, result.stdout
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert 'localPortNumber="8443"' in call_arg, call_arg
+    assert 'portNumber="443"' in call_arg, call_arg
+
+
+def test_eks_legacy_port_still_works_as_local(
+    runner, aws_connect, cwd_with_config, mock_subprocess,
+):
+    """Back-compat: an eks env with only the legacy `port` key keeps using it as
+    the local port, so existing configs do not break."""
+    result = runner.invoke(aws_connect.cli, ["eks", "--env", "staging"])
+    assert result.exit_code == 0, result.stdout
+    assert 'localPortNumber="8443"' in _ssm_call_arg(mock_subprocess)

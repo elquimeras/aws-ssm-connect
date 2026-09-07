@@ -183,8 +183,8 @@ eks:
     jumphost: My Jump Host
     cluster: my-eks-cluster
     account_id: '123456789012'
-    port: '8443'                        # local port (EKS remote port is always 443)
-    # local_port: '9443'                # optional, overrides `port` locally
+    local_port: '8443'                  # local port; EKS has no remote port (always 443)
+    # port: '8443'                      # legacy alias for local_port
 ```
 
 ### Local vs remote ports
@@ -200,9 +200,11 @@ redis:
     local_port: '6378'  # what you connect to locally
 ```
 
-Precedence is `--local-port` > `local_port` > per-command default. `eks` is the
-exception: its remote port is always 443, so there `port` already means the
-local port and `local_port` simply overrides it.
+Precedence is `--local-port` > `local_port` > per-command default.
+
+`eks` is the exception: it has no remote port to configure (the EKS API server
+is always on 443), so it takes only `local_port`. Older eks configs used `port`
+for the local side; both still work, with `local_port` winning.
 
 Every command (`rds`, `redis`, `docdb`, `eks`, `opensearch`, `ec2`) accepts an
 optional `region:` key. When set, all AWS calls for that environment (instance
