@@ -416,3 +416,46 @@ def mock_subprocess_elasticache_null(aws_connect, monkeypatch):
     monkeypatch.setattr(aws_connect, "run_command", mock_run)
     monkeypatch.setattr("os.system", mock_os_system)
     return mock_os_system, mock_run
+
+
+@pytest.fixture
+def cwd_with_local_port_config(aws_connect, monkeypatch, tmp_path):
+    """
+    Config where every port-forwarding service sets an explicit `local_port`
+    distinct from its remote `port`, so tests can prove the two keys are read
+    independently (`port` = remote, `local_port` = local).
+    """
+    config = textwrap.dedent("""\
+        rds:
+          staging:
+            profile: my-profile
+            jumphost: my-jumphost
+            cluster: my-cluster
+            port: '5432'
+            local_port: '5433'
+        redis:
+          staging:
+            profile: my-profile
+            jumphost: my-jumphost
+            endpoint: my-endpoint.cache.amazonaws.com
+            port: '6379'
+            local_port: '6378'
+        docdb:
+          staging:
+            profile: my-profile
+            jumphost: my-jumphost
+            endpoint: my-docdb.cluster-xxxx.us-west-2.docdb.amazonaws.com
+            port: '27017'
+            local_port: '28017'
+        eks:
+          staging:
+            profile: my-profile
+            jumphost: my-jumphost
+            cluster: my-eks-cluster
+            port: '8443'
+            local_port: '9443'
+    """)
+    config_file = tmp_path / "environments.yaml"
+    config_file.write_text(config)
+    monkeypatch.setenv("AWS_CONNECT_CONFIG", str(config_file))
+    return config_file

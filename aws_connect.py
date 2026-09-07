@@ -186,6 +186,17 @@ def _region(config):
     return str(config.get('region') or DEFAULT_REGION)
 
 
+def _local_port(config, cli_local_port, fallback):
+    """Resolve the tunnel's local port: --local-port > config `local_port` > fallback.
+
+    `port` stays the REMOTE port, so overriding only the local side needs its own
+    key. eks is the exception: its remote port is fixed at 443, so its `port` key
+    has always meant "local" and is passed here as the fallback.
+    Absent, `None` and empty string are all treated as "unset".
+    """
+    return str(cli_local_port or config.get('local_port') or fallback)
+
+
 def run_command(cmd, env=None):
     """Run a command and return the output"""
     try:
@@ -346,7 +357,8 @@ def cli():
 @cli.command()
 @click.option('--env', shell_complete=_complete_env('rds'),
               help='Environment to connect to')
-@click.option('--local-port', default='5432', help='Local port (default: 5432)')
+@click.option('--local-port', default=None,
+              help='Local port (default: local_port from environments.yaml, else 5432)')
 def rds(env, local_port):
     """📦 Connect to RDS (PostgreSQL)"""
     environments = get_environments()
@@ -358,6 +370,7 @@ def rds(env, local_port):
         sys.exit(1)
     config = environments['rds'][env]
     region = _region(config)
+    local_port = _local_port(config, local_port, '5432')
 
     click.echo(f"\n🎯 Connecting to RDS {env.upper()}")
     click.echo(f"   Profile: {config['profile']}")
@@ -388,7 +401,8 @@ def rds(env, local_port):
 @cli.command()
 @click.option('--env', shell_complete=_complete_env('redis'),
               help='Environment to connect to')
-@click.option('--local-port', default='6379', help='Local port (default: 6379)')
+@click.option('--local-port', default=None,
+              help='Local port (default: local_port from environments.yaml, else 6379)')
 def redis(env, local_port):
     """🔴 Connect to ElastiCache (Redis)"""
     environments = get_environments()
@@ -400,6 +414,7 @@ def redis(env, local_port):
         sys.exit(1)
     config = environments['redis'][env]
     region = _region(config)
+    local_port = _local_port(config, local_port, '6379')
 
     if 'warning' in config:
         click.echo(f"\n{config['warning']}\n")
@@ -443,7 +458,8 @@ def redis(env, local_port):
 @cli.command()
 @click.option('--env', shell_complete=_complete_env('docdb'),
               help='Environment to connect to')
-@click.option('--local-port', default=None, help='Local port (default: port from environment in environments.yaml)')
+@click.option('--local-port', default=None,
+              help='Local port (default: local_port from environments.yaml, else port)')
 def docdb(env, local_port):
     """🍃 Connect to DocumentDB (port forwarding)"""
     environments = get_environments()
@@ -467,7 +483,7 @@ def docdb(env, local_port):
         click.echo(f"\n{config['warning']}\n")
 
     remote_port = str(config.get('port', '27017'))
-    local_port = str(local_port or remote_port)
+    local_port = _local_port(config, local_port, remote_port)
     docdb_endpoint = config['endpoint']
 
     click.echo(f"\n🎯 Connecting to DocumentDB {env.upper()}")
@@ -495,7 +511,8 @@ def docdb(env, local_port):
 @cli.command()
 @click.option('--env', shell_complete=_complete_env('eks'),
               help='Environment to connect to')
-@click.option('--local-port', default=None, help='Local port (default: port from environment in environments.yaml)')
+@click.option('--local-port', default=None,
+              help='Local port (default: local_port from environments.yaml, else port)')
 @click.option('--configure-kubeconfig', is_flag=True, help='Configure kubeconfig automatically')
 def eks(env, local_port, configure_kubeconfig):
     """☸️  Connect to EKS (Kubernetes)"""
@@ -508,7 +525,7 @@ def eks(env, local_port, configure_kubeconfig):
         sys.exit(1)
     config = environments['eks'][env]
     region = _region(config)
-    local_port = str(local_port or config.get('port', '8443'))
+    local_port = _local_port(config, local_port, config.get('port') or '8443')
 
     click.echo(f"\n🎯 Connecting to EKS {env.upper()}")
     click.echo(f"   Profile: {config['profile']}")

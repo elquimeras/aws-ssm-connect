@@ -958,3 +958,64 @@ def test_wrapper_entrypoint_help_subprocess():
     assert result.returncode == 0, result.stderr
     assert "Usage:" in result.stdout
     assert "Traceback" not in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# config-local-port — `local_port` in environments.yaml sets the local side of
+# the tunnel without overloading `port` (which stays the remote port).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command,expected_local,expected_remote", [
+    ("rds", "5433", "5432"),
+    ("redis", "6378", "6379"),
+    ("docdb", "28017", "27017"),
+    ("eks", "9443", "443"),
+])
+def test_config_local_port_is_honored(
+    runner, aws_connect, cwd_with_local_port_config, mock_subprocess,
+    command, expected_local, expected_remote,
+):
+    """`local_port` drives localPortNumber; the remote portNumber is unaffected."""
+    result = runner.invoke(aws_connect.cli, [command, "--env", "staging"])
+    assert result.exit_code == 0, result.stdout
+    call_arg = _ssm_call_arg(mock_subprocess)
+    assert f'localPortNumber="{expected_local}"' in call_arg, call_arg
+    assert f'portNumber="{expected_remote}"' in call_arg, call_arg
+    assert f"Local port: {expected_local}" in result.stdout
+
+
+@pytest.mark.parametrize("command", ["rds", "redis", "docdb", "eks"])
+def test_cli_local_port_beats_config_local_port(
+    runner, aws_connect, cwd_with_local_port_config, mock_subprocess, command,
+):
+    """--local-port outranks `local_port` from the config file."""
+    result = runner.invoke(
+        aws_connect.cli, [command, "--env", "staging", "--local-port", "19999"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert 'localPortNumber="19999"' in _ssm_call_arg(mock_subprocess)
+
+
+@pytest.mark.parametrize("command,expected_local", [
+    ("rds", "5432"),
+    ("redis", "6379"),
+    ("eks", "8443"),
+])
+def test_local_port_defaults_unchanged_without_config_key(
+    runner, aws_connect, cwd_with_config, mock_subprocess, command, expected_local,
+):
+    """Back-compat: with no `local_port` key, each command keeps its old default
+    (rds/redis their fixed port, eks its legacy `port`-as-local reading)."""
+    result = runner.invoke(aws_connect.cli, [command, "--env", "staging"])
+    assert result.exit_code == 0, result.stdout
+    assert f'localPortNumber="{expected_local}"' in _ssm_call_arg(mock_subprocess)
+
+
+def test_docdb_local_port_still_defaults_to_remote_port(
+    runner, aws_connect, cwd_with_docdb_config, mock_subprocess,
+):
+    """Back-compat: docdb with no `local_port` still mirrors the remote port."""
+    result = runner.invoke(aws_connect.cli, ["docdb", "--env", "production"])
+    assert result.exit_code == 0, result.stdout
+    assert 'localPortNumber="27017"' in _ssm_call_arg(mock_subprocess)
