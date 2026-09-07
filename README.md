@@ -155,7 +155,8 @@ rds:
     profile: my-aws-profile             # AWS CLI profile
     jumphost: My Jump Host              # EC2 jump host name
     cluster: my-cluster-name            # RDS cluster identifier (resolved at runtime)
-    port: '5432'
+    port: '5432'                        # remote port on the DB
+    # local_port: '5433'                # optional, local side of the tunnel
 
 redis:
   my-environment:
@@ -163,14 +164,16 @@ redis:
     jumphost: My Jump Host
     cluster: my-replication-group-id    # ElastiCache replication group (resolved at runtime)
     # endpoint: my-host.cache.amazonaws.com   # alternative: literal host, no AWS lookup
-    port: '6379'
+    port: '6379'                        # remote port on ElastiCache
+    # local_port: '6378'                # optional, local side of the tunnel
 
 docdb:
   my-environment:
     profile: my-aws-profile
     jumphost: My Jump Host
     endpoint: my-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com  # literal cluster DNS endpoint
-    port: '27017'
+    port: '27017'                       # remote port on DocumentDB
+    # local_port: '28017'               # optional, local side of the tunnel
     # region: us-west-2                  # optional, defaults to us-east-1
     # warning: 'Connecting to production DocumentDB'  # optional
 
@@ -180,8 +183,28 @@ eks:
     jumphost: My Jump Host
     cluster: my-eks-cluster
     account_id: '123456789012'
-    port: '8443'
+    local_port: '8443'                  # local port; EKS has no remote port (always 443)
+    # port: '8443'                      # legacy alias for local_port
 ```
+
+### Local vs remote ports
+
+`port` is the **remote** port the tunnel connects to (`rds`, `redis`, `docdb`).
+`local_port` is optional and sets only the **local** side, so you can keep the
+default port free for services already running on your machine:
+
+```yaml
+redis:
+  general-prod:
+    port: '6379'        # what ElastiCache listens on
+    local_port: '6378'  # what you connect to locally
+```
+
+Precedence is `--local-port` > `local_port` > per-command default.
+
+`eks` is the exception: it has no remote port to configure (the EKS API server
+is always on 443), so it takes only `local_port`. Older eks configs used `port`
+for the local side; both still work, with `local_port` winning.
 
 Every command (`rds`, `redis`, `docdb`, `eks`, `opensearch`, `ec2`) accepts an
 optional `region:` key. When set, all AWS calls for that environment (instance
@@ -274,7 +297,7 @@ Ensure your AWS profiles have the following permissions:
 - For EKS, by default it only does port forwarding. Use `--configure-kubeconfig` if you need to configure kubectl automatically
 - The Kubernetes context is named after the **profile** (not the cluster), so you can have several environments with the same cluster name without context name collisions
 - Keep the session active in one terminal and use kubectl in another
-- Use `--local-port` to avoid conflicts if something is already running on the default port
+- Use `--local-port` to avoid conflicts if something is already running on the default port, or set `local_port:` in `environments.yaml` to make it permanent
 
 ## 🆘 Troubleshooting
 

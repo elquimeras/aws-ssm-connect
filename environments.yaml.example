@@ -2,13 +2,23 @@
 # Reference template. The working config lives in environments.yaml (tracked in
 # this private repo). It holds AWS profile names and infrastructure identifiers
 # (jump hosts, cluster/replication-group ids, domains) — not credentials.
+#
+# PORTS: `port` is the REMOTE port the tunnel connects to. `local_port` is
+# optional and changes only YOUR side, so the default port stays free for a
+# service already running locally. Setting `port` to a value the remote does
+# not listen on makes the tunnel open and then die on first use.
+# Precedence: --local-port > local_port > per-command default.
+# `eks` has no remote port to configure (always 443), so it takes only
+# `local_port`. Its older configs used `port` for that; both still work, with
+# `local_port` winning.
 
 rds:
   my-environment:
     profile: my-aws-profile
     jumphost: My Jump Host
     cluster: my-cluster-name
-    port: '5432'
+    port: '5432'                       # remote port on the DB
+    # local_port: '5433'               # optional: local side of the tunnel (default: 5432)
     # profile_cluster: other-profile   # optional: different profile for the cluster
     # region: us-west-2                # optional: defaults to us-east-1
 
@@ -18,7 +28,8 @@ redis:
     jumphost: My Jump Host
     cluster: my-replication-group-id
     # endpoint: my-endpoint.cache.amazonaws.com  # fallback: literal endpoint, no AWS lookup
-    port: '6379'
+    port: '6379'                       # remote port on ElastiCache
+    # local_port: '6378'               # optional: local side of the tunnel (default: 6379)
     # warning: 'Warning message'       # optional
     # region: us-west-2                # optional: defaults to us-east-1
 
@@ -27,7 +38,8 @@ docdb:
     profile: my-aws-profile
     jumphost: My Jump Host
     endpoint: my-cluster.cluster-xxxx.us-west-2.docdb.amazonaws.com
-    port: '27017'
+    port: '27017'                      # remote port on DocumentDB
+    # local_port: '28017'              # optional: local side of the tunnel (default: same as port)
     # region: us-west-2                # optional: defaults to us-east-1
     # warning: 'Warning message'       # optional
 
@@ -36,7 +48,9 @@ eks:
     profile: my-k8s-profile
     jumphost: My Jump Host
     cluster: my-eks-cluster
-    port: '8443'
+    local_port: '8443'                 # local port; EKS has no remote port to set (always 443)
+    # port: '8443'                     # legacy alias for local_port — prefer local_port
+    # account_id: '123456789012'       # optional: skips an AWS lookup on --configure-kubeconfig
     # region: us-west-2                # optional: defaults to us-east-1
 
 opensearch:
