@@ -2,6 +2,14 @@
 # Reference template. The working config lives in environments.yaml (tracked in
 # this private repo). It holds AWS profile names and infrastructure identifiers
 # (jump hosts, cluster/replication-group ids, domains) — not credentials.
+#
+# PORTS: `port` is the REMOTE port the tunnel connects to. `local_port` is
+# optional and changes only YOUR side, so the default port stays free for a
+# service already running locally. Setting `port` to a value the remote does
+# not listen on makes the tunnel open and then die on first use.
+# Precedence: --local-port > local_port > per-command default.
+# `eks` is the exception: its remote port is always 443, so there `port` already
+# means the local port and `local_port` just overrides it.
 
 rds:
   my-environment:
@@ -41,6 +49,7 @@ eks:
     cluster: my-eks-cluster
     port: '8443'                       # local port (the EKS remote port is always 443)
     # local_port: '9443'               # optional: overrides `port` for the local side
+    # account_id: '123456789012'       # optional: skips an AWS lookup on --configure-kubeconfig
     # region: us-west-2                # optional: defaults to us-east-1
 
 opensearch:
